@@ -1,0 +1,142 @@
+Predicting quality of Exercise from Activity Monitors
+========================================================
+
+## Introduction
+- The data for this project consists of data collected from sensors using weight-lifting exercise from six young health participants during one set of 10 repetitions of the Unilateral Dumbbell Biceps Curl in five different fashions classified into five different classes. 
+- Class A corresponds to the specified execution of the exercise, while the other 4 classes correspond to common mistakes. The resulting data was collected.
+- Read more at : http://groupware.les.inf.puc-rio.br/har#ixzz3b2I291Yx
+
+## Getting & Cleaning Data
+In this document, we read the above data provided in the form of training and testing datasets. 
+
+
+```r
+training_data= read.csv('pml-training.csv',na.strings=c(""), stringsAsFactors=FALSE)
+testing_data= read.csv('pml-testing.csv', na.strings=c(""), stringsAsFactors=FALSE)
+```
+
+We observe that some of the missing values are already encoded as NA strings. We will replace them with R's NA values.
+
+
+```r
+training_data[training_data=='NA']= NA
+testing_data[testing_data=='NA']= NA
+```
+
+We would like to see the number of NAs and eliminate columns which predominantly have NAs. For this we write the following function and remove all columns in which 90% or more of the values are NAs
+
+
+```r
+remove_na_columns_x= function(df,x)
+{
+     na_colnames= colnames(df[, colSums(is.na(df)) >= x*nrow(df)])
+     df_wo_na= df[,-which(names(df) %in% na_colnames)]
+}
+filtered_training_data= remove_na_columns_x(training_data,0.9)
+```
+
+Next, we get rid of few book-keeping variables which will not be very useful for building the model.
+
+```r
+tr2= subset(filtered_training_data,select=-c(X,new_window,num_window, cvtd_timestamp,user_name,raw_timestamp_part_1,raw_timestamp_part_2))
+tr2$classe= as.factor(tr2$classe)
+```
+
+-Use the same variables in test data
+
+```r
+filtered_test_data= testing_data[,which(names(testing_data) %in% names(tr2))]
+```
+
+## Approach:
+For building the model, we would like to:
+- Split the training data into training and validation datasets.
+- We intend to build a model using Random Forest Classifier.
+- Perform a 5 fold cross-validation on the training data and select the best model
+- Get the predictions on the validation set
+- Estimate the out of sample error from the predictions on validation set
+
+We will use the caret's train and trainControl functions to perform 5-fold cross-validation and use the best model therefrom for prediction.
+
+
+### Partition Training Data
+- We partition training dataset into 70-30 proportions.
+- We will build model on the 70-proportion dataset 
+- We will validate the model on the ValidationSet and estimate the out of sample error from it.
+
+```r
+library(caret)
+```
+
+```
+## Loading required package: lattice
+## Loading required package: ggplot2
+```
+
+```r
+trainingIndices <- createDataPartition(y = tr2$classe, p = 0.7, list = FALSE)
+trainingData= tr2[trainingIndices, ]
+ValidationSet= tr2[-trainingIndices, ]
+```
+
+### Cross Validation & Model Generation
+- We will use the random forest classifier and build the model using caret package.
+- Since the model generation takes a lot of time, we save the model if it doesnot exist(first run), else we will load the saved model.
+- We perform 5 fold cross-valiation as shown in the `trControl` variable in the code below.
+
+```r
+set.seed(825)
+library(caret)
+if(!file.exists('rfModel.RData'))
+{
+rfModel= train(classe ~ ., data = trainingData,method = "rf", prox=TRUE, allowParallel=TRUE, trControl=trainControl(method="cv", number=5))
+
+save('rfModel', file="rfModel.RData")
+}else{
+     load('rfModel.RData')
+     }
+```
+
+## Estimate out of sample error rate
+- We will generate the predictions on the validation dataset
+- Compute the accuracy, which is defined as number of correct predicitons divided by number of predictions.
+- Out of sample error rate is computed as `1-outOfSampleAccuracy`
+
+```r
+validation_predictions= predict(rfModel, newdata = ValidationSet)
+```
+
+```
+## Loading required package: randomForest
+## randomForest 4.6-10
+## Type rfNews() to see new features/changes/bug fixes.
+```
+
+```r
+outOfSampleAccuracy= sum(validation_predictions == ValidationSet$classe)/length(validation_predictions)
+outOfSampleError= 1 - outOfSampleAccuracy
+outOfSampleError
+```
+
+```
+## [1] 0.001699235
+```
+
+
+## Predictions on Test Data
+
+Since the estimated Out Of Sample accuracy is pretty good, we go ahead and use this model to generate the predictions on the testing dataset.
+
+
+```r
+test_predictions= predict(rfModel, newdata = filtered_test_data)
+test_predictions
+```
+
+```
+##  [1] B A B A A E D B A A B C B A E E A B B B
+## Levels: A B C D E
+```
+
+
+
